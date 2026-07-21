@@ -25,6 +25,7 @@ autoplay path would fail here.
 """
 
 import subprocess
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -110,8 +111,16 @@ def pause_seconds(kind: str, lang: str, fmt: LessonFormat) -> float:
 
 
 def play_wav(path: Path) -> None:
+    """Play one clip.
+
+    `-nostdin` is not optional. Without it ffplay puts the terminal into
+    non-canonical mode and reads keystrokes for its own transport controls,
+    which swallows the answer you type in quiz mode — the prompt then appears
+    to skip past without waiting. It only misbehaves on a real TTY, so piping
+    input during testing hides the bug entirely.
+    """
     subprocess.run(
-        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", str(path)],
+        ["ffplay", "-nostdin", "-nodisp", "-autoexit", "-loglevel", "quiet", str(path)],
         check=False,
     )
 
@@ -199,12 +208,30 @@ def play_item(conn, item: dict, fmt: LessonFormat, mode: str = "passive") -> str
     return outcome
 
 
-def _ask() -> str:
-    """Ask whether the word was recalled. Anything else counts as unsure."""
+def _drain_stdin() -> None:
+    """Discard anything typed while audio was playing.
+
+    Otherwise a stray keypress during the clip is sitting in the buffer when
+    the prompt appears and answers it instantly, which reads as the prompt not
+    waiting at all.
+    """
     try:
-        answer = input("    did you get it? [y/n] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        raise
+        import termios
+
+        if sys.stdin.isatty():
+            termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+    except Exception:
+        pass
+
+
+def _ask() -> str:
+    """Ask whether the word was recalled.
+
+    Only an explicit 'y' counts as recalled; a bare Enter counts as missed, on
+    the grounds that hesitation is not recall.
+    """
+    _drain_stdin()
+    answer = input("    did you get it? [y/N] ").strip().lower()
     return "got" if answer.startswith("y") else "missed"
 
 
