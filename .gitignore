@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Local state — derived from a personal Anki collection, never commit
+data/*.db
+data/*.db-wal
+data/*.db-shm
+audio/cache/
+audio/*.wav
+audio/*.mp3
+*.mp3
+*.wav
+
+# Anki collection copies (personal review history)
+collection.anki2*
+*.colpkg
+*.apkg
