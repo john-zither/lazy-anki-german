@@ -259,7 +259,9 @@ def run_session(
             else:
                 scheduler.touch(conn, item["lemma"])
             conn.commit()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
+        # Ctrl-C, or stdin closing in a non-interactive run: end the session
+        # cleanly and keep whatever grades were already recorded.
         pass
 
     return {
