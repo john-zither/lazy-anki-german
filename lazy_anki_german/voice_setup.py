@@ -60,15 +60,11 @@ GERMAN_SOURCES = [
         ),
         "start": 300,
     },
-    {
-        "name": "de_narrator_alt.wav",
-        "url": (
-            "https://archive.org/download/der_rasende_reporter_2201_librivox/"
-            "rasendereporter_01_kisch_64kb.mp3"
-        ),
-        "start": 180,
-    },
 ]
+
+# A Rasende Reporter reading was also trialled and rejected on listening: it
+# cloned stably but sounded markedly worse than both alternatives.
+FALLBACK_VOICE = "female_02.wav"
 
 # English is only used for glosses, where a built-in XTTS voice is already
 # clean and correctly accented, so nothing needs downloading.
