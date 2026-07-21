@@ -19,8 +19,9 @@ SCHEMA = """
 -- ---------------------------------------------------------------- from Anki
 
 CREATE TABLE IF NOT EXISTS vocab (
-    lemma        TEXT PRIMARY KEY,   -- normalised key, e.g. "abbiegen"
+    lemma        TEXT PRIMARY KEY,   -- normalised key, case-preserved: "Abbildung"
     display      TEXT NOT NULL,      -- what gets spoken, e.g. "die Abbildung"
+    full_form    TEXT,               -- headword as shipped, "die Abbildung, -en"
     article      TEXT,               -- der/die/das when known
     plural       TEXT,
     ipa          TEXT,

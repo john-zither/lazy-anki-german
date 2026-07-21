@@ -62,14 +62,41 @@ def clean(text: str | None) -> str:
 def lemma_of(word: str) -> str:
     """Normalise a headword to a dedupe key.
 
-    "die Abbildung, -en"                    -> "abbildung"
+    "die Abbildung, -en"                    -> "Abbildung"
     "abbiegen, biegt ab, bog ab, ist ..."   -> "abbiegen"
+
+    Case is deliberately preserved. German capitalises nouns, so lowercasing
+    merges distinct words — "das Leben" (life) with "leben" (to live), "das
+    Gut" (estate) with "gut" (good) — which then inherit each other's articles
+    and glosses. Capitalisation is consistent across these decks, so it is a
+    reliable discriminator.
     """
     base = clean(word).split(",")[0].strip()
     parts = base.split()
     if len(parts) > 1 and parts[0].lower() in ARTICLES:
         base = " ".join(parts[1:])
-    return base.lower().strip(" .!?")
+    return base.strip(" .!?")
+
+
+_PAREN_RE = re.compile(r"\([^)]*\)")
+
+
+def speakable(word: str, article: str | None = None) -> str:
+    """The form actually sent to TTS.
+
+    Deck headwords carry inflection and abbreviation baggage — "Zeit, -en",
+    "werden, wird, wurde, ist geworden", "Abbildung, -en (Abb.)" — which a
+    speech engine reads out literally. Keep the headword, drop the rest, and
+    lead with the article so gender is learned with the noun.
+    """
+    base = _PAREN_RE.sub(" ", clean(word)).split(",")[0].strip()
+    parts = base.split()
+    if len(parts) > 1 and parts[0].lower() in ARTICLES:
+        article, base = parts[0].lower(), " ".join(parts[1:])
+    base = re.sub(r"\s+", " ", base).strip(" -–—.!?")
+    if article and base and not base.lower().startswith(article + " "):
+        return f"{article} {base}"
+    return base
 
 
 def split_article(word: str) -> tuple[str | None, str]:
@@ -132,9 +159,10 @@ def parse_sentence_table(html: str) -> list[tuple[str, str]]:
 @dataclass
 class Entry:
     lemma: str
-    display: str
+    display: str      # speakable form, e.g. "die Zeit"
     gloss: str
     source: str
+    full_form: str | None = None  # headword as the deck shipped it
     article: str | None = None
     plural: str | None = None
     ipa: str | None = None
@@ -235,7 +263,8 @@ def parse_english_deutsch(conn, ntid: int) -> list[Entry]:
         lemma = lemma_of(word)
         if not lemma:
             continue
-        article, display = split_article(word)
+        article, _ = split_article(word)
+        display = speakable(word, article)
 
         glosses, poss, sentences = [], [], []
         for n in (1, 2, 3):
@@ -258,6 +287,7 @@ def parse_english_deutsch(conn, ntid: int) -> list[Entry]:
             Entry(
                 lemma=lemma,
                 display=display,
+                full_form=clean(word),
                 gloss="; ".join(glosses),
                 source=NT_ENGLISH_DEUTSCH,
                 article=article,
@@ -287,9 +317,7 @@ def parse_b1(conn, ntid: int) -> list[Entry]:
             continue
 
         article = clean(_get(f, idx, "artikel_d")).lower() or None
-        display = clean(_get(f, idx, "base_d")) or clean(base)
-        if article and not display.lower().startswith(article):
-            display = f"{article} {display}"
+        display = speakable(_get(f, idx, "base_d") or base, article)
 
         sentences = []
         for n in range(1, 10):
@@ -302,6 +330,7 @@ def parse_b1(conn, ntid: int) -> list[Entry]:
             Entry(
                 lemma=lemma,
                 display=display,
+                full_form=clean(_get(f, idx, "full_d")) or None,
                 gloss=gloss,
                 source="B1_Wortliste_DTZ_Goethe",
                 article=article,
@@ -329,13 +358,16 @@ def parse_neri(conn, ntid: int, source: str) -> list[Entry]:
         if not gloss:
             continue
 
-        article, display = split_article(_get(f, idx, "Word with Article") or word)
+        raw_display = _get(f, idx, "Word with Article") or word
+        article, _ = split_article(raw_display)
+        display = speakable(raw_display, article)
         index = clean(_get(f, idx, "Index"))
 
         entries.append(
             Entry(
                 lemma=lemma,
                 display=display,
+                full_form=clean(raw_display),
                 gloss=gloss,
                 source=source,
                 article=article,
@@ -362,11 +394,13 @@ def parse_vokabeln(conn, ntid: int) -> list[Entry]:
         gloss = clean(f[back])
         if not lemma or not gloss:
             continue
-        article, display = split_article(f[front])
+        article, _ = split_article(f[front])
+        display = speakable(f[front], article)
         entries.append(
             Entry(
                 lemma=lemma,
                 display=display,
+                full_form=clean(f[front]),
                 gloss=gloss,
                 source="Vokabeln/DeuEng",
                 article=article,
@@ -402,6 +436,7 @@ def merge(groups: list[list[Entry]]) -> dict[str, Entry]:
             winner.article = winner.article or loser.article
             winner.plural = winner.plural or loser.plural
             winner.ipa = winner.ipa or loser.ipa
+            winner.full_form = winner.full_form or loser.full_form
             winner.pos = winner.pos or loser.pos
             if winner.freq_rank is None:
                 winner.freq_rank = loser.freq_rank
@@ -495,12 +530,13 @@ def import_collection(db_conn, collection_path: Path = DEFAULT_COLLECTION) -> di
         db_conn.execute("DELETE FROM vocab")
 
         db_conn.executemany(
-            "INSERT INTO vocab(lemma, display, article, plural, ipa, pos, gloss,"
-            " curated_rank, source, has_sentence) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO vocab(lemma, display, full_form, article, plural, ipa, pos,"
+            " gloss, curated_rank, source, has_sentence) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             [
                 (
-                    e.lemma, e.display, e.article, e.plural, e.ipa, e.pos,
-                    e.gloss, e.freq_rank, e.source, 1 if e.sentences else 0,
+                    e.lemma, e.display, e.full_form, e.article, e.plural,
+                    e.ipa, e.pos, e.gloss, e.freq_rank, e.source,
+                    1 if e.sentences else 0,
                 )
                 for e in merged.values()
             ],
