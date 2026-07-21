@@ -26,12 +26,15 @@ CREATE TABLE IF NOT EXISTS vocab (
     ipa          TEXT,
     pos          TEXT,
     gloss        TEXT NOT NULL,      -- English meaning
-    freq_rank    INTEGER,            -- lower is more frequent; NULL if unranked
+    curated_rank INTEGER,            -- rank as shipped by the deck; NULL if none
+    zipf         REAL,               -- wordfreq Zipf score; 0 = unknown to corpora
+    freq_rank    INTEGER,            -- unified 1-based ordering, 1 = most frequent
     source       TEXT NOT NULL,      -- which notetype it came from
     has_sentence INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_vocab_freq ON vocab(freq_rank);
+CREATE INDEX IF NOT EXISTS idx_vocab_zipf ON vocab(zipf);
 CREATE INDEX IF NOT EXISTS idx_vocab_sent ON vocab(has_sentence);
 
 CREATE TABLE IF NOT EXISTS sentences (

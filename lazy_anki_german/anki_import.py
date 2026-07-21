@@ -496,7 +496,7 @@ def import_collection(db_conn, collection_path: Path = DEFAULT_COLLECTION) -> di
 
         db_conn.executemany(
             "INSERT INTO vocab(lemma, display, article, plural, ipa, pos, gloss,"
-            " freq_rank, source, has_sentence) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            " curated_rank, source, has_sentence) VALUES(?,?,?,?,?,?,?,?,?,?)",
             [
                 (
                     e.lemma, e.display, e.article, e.plural, e.ipa, e.pos,
@@ -525,6 +525,13 @@ def import_collection(db_conn, collection_path: Path = DEFAULT_COLLECTION) -> di
         dbmod.set_meta(db_conn, "last_import", str(int(time.time())))
         dbmod.set_meta(db_conn, "anki_last_sync", str(sync_info["last_sync"] or 0))
 
+    # Curated ranks cover only ~5.5k of the words; fill in the rest from corpus
+    # frequency so lesson ordering is meaningful across the whole collection.
+    from . import frequency
+
+    freq_info = frequency.assign_ranks(db_conn)
+
     result = dbmod.stats(db_conn)
     result["sync"] = sync_info
+    result["frequency"] = freq_info
     return result

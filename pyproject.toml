@@ -5,6 +5,7 @@ description = "Hands-free German vocabulary trainer — speaks words, meanings a
 requires-python = ">=3.10"
 dependencies = [
     "requests>=2.31",
+    "wordfreq>=3.0",
 ]
 
 [build-system]
