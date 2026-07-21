@@ -21,6 +21,12 @@ import requests
 
 ALLTALK_URL = "http://localhost:7851"
 
+# XTTSv2 renders at 24kHz mono. Silence padding and any concatenation must match
+# it exactly — mixing rates in ffmpeg's concat demuxer produces non-monotonic
+# DTS warnings and can corrupt timing in the joined file.
+OUTPUT_SAMPLE_RATE = 24000
+OUTPUT_SAMPLE_FORMAT = "pcm_f32le"
+
 # Where AllTalk drops generated files on the host (bind mount from compose).
 ALLTALK_STORAGE = Path(
     "/home/theurerjohn3/Documents/agents/2026/ragnas/alltalk_storage"

@@ -20,6 +20,34 @@ import time
 # Expanding within-session replays, in seconds from first exposure.
 REPEAT_OFFSETS = (120, 600, 2400)
 
+
+def plays_per_word(total_seconds: float) -> int:
+    """How many times a word can realistically be heard in a session this long.
+
+    Only replays whose offset fits inside the session are reachable: a 5-minute
+    session never gets to the +10 or +40 minute repeat. Assuming otherwise
+    under-fills the session — it requests a third of the words it has room
+    for, the queue runs dry, and the timeline idles waiting for replays that
+    never come due.
+    """
+    return 1 + sum(1 for offset in REPEAT_OFFSETS if offset < total_seconds)
+
+
+# Effective plays per word when filling a session. Capped below
+# plays_per_word() on purpose: later replays are constrained to fixed offsets,
+# so words introduced late in a session never receive theirs. Sizing the word
+# list off the theoretical maximum leaves the queue empty while no replay is
+# yet due, the timeline idles, and sessions came out 25% short. Assuming ~2
+# plays over-provisions slightly and fills reliably at every session length.
+FILL_PLAYS = 2
+
+
+def words_needed(total_seconds: float, item_seconds: float) -> int:
+    """Number of distinct words required to fill a session of this length."""
+    slots = total_seconds / max(item_seconds, 1.0)
+    divisor = min(plays_per_word(total_seconds), FILL_PLAYS)
+    return max(4, int(slots / divisor) + 1)
+
 # Share of a session given to words never seen before. Kept low so most of what
 # you hear is already familiar and the material stays comprehensible.
 NEW_RATIO = 0.2
@@ -139,13 +167,19 @@ def best_sentence(conn, lemma: str) -> dict | None:
 # ------------------------------------------------------------------ timeline
 
 
-def build_timeline(items: list[dict], item_seconds: float, total_seconds: float) -> list[dict]:
+def build_timeline(items: list[dict], item_seconds, total_seconds: float) -> list[dict]:
     """Lay items out over a session, interleaving expanding replays.
 
     Returns a list of {item, repeat_index}. A word's replays are emitted when
     the session clock passes their target offset, so spacing is real elapsed
     time rather than a fixed number of intervening cards.
+
+    `item_seconds` may be a constant or a callable taking an item. Passing a
+    callable matters: items vary from ~6s to ~20s depending on sentence length,
+    and driving the clock off a single average makes the session clock drift
+    away from the audio it is supposed to describe.
     """
+    duration_of = item_seconds if callable(item_seconds) else (lambda _: item_seconds)
     timeline: list[dict] = []
     pending: list[tuple[float, dict, int]] = []  # (due_at, item, repeat_index)
     clock = 0.0
@@ -184,7 +218,7 @@ def build_timeline(items: list[dict], item_seconds: float, total_seconds: float)
         last_lemma = item["lemma"]
 
         timeline.append({"item": item, "repeat": repeat_index})
-        clock += item_seconds
+        clock += duration_of(item)
 
         if repeat_index < len(REPEAT_OFFSETS):
             pending.append((clock + REPEAT_OFFSETS[repeat_index], item, repeat_index + 1))
